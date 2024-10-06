@@ -49,6 +49,10 @@ func Parse(strExpr string, vars map[string]Token) (_ evaluator.Expression, err e
 		case unicode.IsNumber(expr[i]):
 			var num Token
 			i, num, err = parseNumber(expr, i)
+			if err != nil {
+				return nil, err
+			}
+
 			rpnBuilder.handleToken(num)
 
 		case isVarChar(expr[i]):
@@ -234,19 +238,18 @@ func Parse(strExpr string, vars map[string]Token) (_ evaluator.Expression, err e
 // which allows the operators to take advantage
 // of that
 type EvaluationData struct {
-	rpn  []Token
-	vars mapToken
+	Vars mapToken
 
-	leftRef  refToken
-	rightRef refToken
-
-	op string
+	LeftRef  refToken
+	RightRef refToken
 }
 
 // Evaluate will copy
 func Evaluate(originalRpn []Token, vars map[string]Token) (_ Token, err error) {
 	var left, right Token
-	var data EvaluationData
+	data := EvaluationData{
+		Vars: vars,
+	}
 
 	rpn := copyRPN(originalRpn)
 
@@ -258,7 +261,7 @@ func Evaluate(originalRpn []Token, vars map[string]Token) (_ Token, err error) {
 		op, isOperator := token.(opToken)
 		if !isOperator {
 			if v, isVar := token.(varToken); isVar {
-				token = v.Resolve(vars)
+				token = v.Resolve(data.Vars)
 			}
 
 			evalStack = append(evalStack, token)
@@ -273,26 +276,26 @@ func Evaluate(originalRpn []Token, vars map[string]Token) (_ Token, err error) {
 
 		switch v := right.(type) {
 		case refToken:
-			data.rightRef = v
-			right = v.Resolve(vars)
+			data.RightRef = v
+			right = v.Resolve(data.Vars)
 		case varToken:
-			data.rightRef = refToken{key: v}
+			data.RightRef = refToken{key: v}
 		default:
-			data.rightRef = refToken{}
+			data.RightRef = refToken{}
 		}
 
 		switch v := left.(type) {
 		case refToken:
-			data.leftRef = v
-			left = v.Resolve(vars)
+			data.LeftRef = v
+			left = v.Resolve(data.Vars)
 		case varToken:
-			data.leftRef = refToken{key: v}
+			data.LeftRef = refToken{key: v}
 		default:
-			data.leftRef = refToken{}
+			data.LeftRef = refToken{}
 		}
 
 		if fn, ok := left.(Function); ok && op == "()" {
-			args := tupleToken{}
+			var args tupleToken
 			if tuple, ok := right.(tupleToken); ok {
 				args = tuple
 			} else {
@@ -300,12 +303,12 @@ func Evaluate(originalRpn []Token, vars map[string]Token) (_ Token, err error) {
 				args = tupleToken{right}
 			}
 
-			var fnReceiver = vars
-			if data.leftRef.origin != nil {
-				fnReceiver = data.leftRef.origin
+			var fnReceiver = data.Vars
+			if data.LeftRef.origin != nil {
+				fnReceiver = data.LeftRef.origin
 			}
 
-			resp, err := execFunc(fnReceiver, fn, args, vars)
+			resp, err := execFunc(fnReceiver, fn, args, data.Vars)
 			if err != nil {
 				return nil, insights.RuntimeErr("error parsing function", map[string]any{
 					"error": err,

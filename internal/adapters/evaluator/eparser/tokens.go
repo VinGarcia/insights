@@ -81,7 +81,7 @@ func (f floatToken) Clone() Token {
 }
 
 func (f floatToken) String() string {
-	return fmt.Sprint(f)
+	return strconv.FormatFloat(float64(f), 'f', -1, 64)
 }
 
 // boolToken represent boolean values

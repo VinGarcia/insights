@@ -1,6 +1,7 @@
 package evaluator
 
 import (
+	"encoding/json"
 	"testing"
 
 	tt "github.com/vingarcia/insights/internal/testtools"
@@ -35,7 +36,10 @@ func Test(t *testing.T, factory func(expr string) (Expression, error)) {
 			evaluator, err := factory(test.expr)
 			tt.AssertNoErr(t, err)
 
-			result, err := evaluator.Evaluate(test.vars)
+			rawJSON, err := json.Marshal(test.vars)
+			tt.AssertNoErr(t, err)
+
+			result, err := evaluator.Evaluate(rawJSON)
 			if test.expectErrToContain != nil {
 				tt.AssertErrContains(t, err, test.expectErrToContain...)
 				t.Skip()

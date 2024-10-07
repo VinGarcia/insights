@@ -22,23 +22,20 @@ func New(expr string) (Evaluator, error) {
 	}, nil
 }
 
-func (e Evaluator) Evaluate(vars map[string]any) (bool, error) {
-	result, err := e.evaluator.Evaluate(vars)
+func (e Evaluator) Evaluate(logLine json.RawMessage) (bool, error) {
+	var m map[string]any
+	err := json.Unmarshal(logLine, &m)
+	if err != nil {
+		return false, err
+	}
+
+	result, err := e.evaluator.Evaluate(m)
 	if err != nil {
 		return false, fmt.Errorf(
-			"error evaluating expression '%v': %w, input values: %s",
-			e.evaluator, err, stringify(vars),
+			"error evaluating expression '%v': %w, input logLine: '%s'",
+			e.evaluator, err, string(logLine),
 		)
 	}
 
 	return result, nil
-}
-
-func stringify(obj any) string {
-	b, err := json.Marshal(obj)
-	if err != nil {
-		b = []byte(fmt.Sprintf("%+v", obj))
-	}
-
-	return string(b)
 }

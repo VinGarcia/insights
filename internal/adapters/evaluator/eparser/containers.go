@@ -6,22 +6,22 @@ import (
 	"github.com/vingarcia/insights"
 )
 
-// TokenList represents a list data type
-type TokenList []Token
+// listToken represents a list data type
+type listToken []Token
 
-// NewTokenList is an internal constructor that matches the signature
+// NewListToken is an internal constructor that matches the signature
 // of the type `Function`
-func NewTokenList(args []Token, scope mapToken) (Token, error) {
-	return TokenList(args), nil
+func NewListToken(args []Token, scope mapToken) (Token, error) {
+	return listToken(args), nil
 }
 
-func (t TokenList) Clone() Token {
+func (t listToken) Clone() Token {
 	return t
 }
 
 // TODO(vingarcia): Consider how to handle an infinite loop
 // in case the list contains itself
-func (t TokenList) String() string {
+func (t listToken) String() string {
 	tokens := []string{}
 	for _, token := range t {
 		tokens = append(tokens, token.String())
@@ -29,13 +29,13 @@ func (t TokenList) String() string {
 	return "[" + strings.Join(tokens, ",") + "]"
 }
 
-// TokenMap represents a map data type
-type TokenMap map[string]Token
+// mapToken represents a map data type
+type mapToken map[string]Token
 
-// NewTokenMap is an internal constructor that matches the signature
+// NewMapToken is an internal constructor that matches the signature
 // of the type `Function`
-func NewTokenMap(args []Token, scope mapToken) (Token, error) {
-	m := TokenMap{}
+func NewMapToken(args []Token, scope mapToken) (Token, error) {
+	m := mapToken{}
 	for _, v := range args {
 		kv, notAKVPair := v.(KeyValuePair)
 		if !notAKVPair {
@@ -57,18 +57,24 @@ func NewTokenMap(args []Token, scope mapToken) (Token, error) {
 	return m, nil
 }
 
-func (t TokenMap) Clone() Token {
+func (t mapToken) Clone() Token {
 	return t
 }
 
 // TODO(vingarcia): Consider how to handle an infinite loop
 // in case the map contains itself
-func (t TokenMap) String() string {
+func (t mapToken) String() string {
 	kvPairs := []string{}
 	for k, v := range t {
 		kvPairs = append(kvPairs, k+":"+v.String())
 	}
 	return "{" + strings.Join(kvPairs, ",") + "}"
+}
+
+func (m mapToken) getChildMap() mapToken {
+	return mapToken{
+		"$parent": m,
+	}
 }
 
 type KeyValuePair struct {
@@ -82,4 +88,20 @@ func (k KeyValuePair) Clone() Token {
 
 func (k KeyValuePair) String() string {
 	return k.Key + ":" + k.Value.String()
+}
+
+// tupleToken represents tuples like in Python: (1, "foo", false)
+type tupleToken []Token
+
+func (t tupleToken) Clone() Token {
+	return t
+}
+
+func (t tupleToken) String() string {
+	items := []string{}
+	for _, token := range t {
+		items = append(items, token.String())
+	}
+
+	return "(" + strings.Join(items, ",") + ")"
 }

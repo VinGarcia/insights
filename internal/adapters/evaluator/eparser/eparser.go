@@ -1,6 +1,7 @@
 package eparser
 
 import (
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"unicode"
@@ -8,6 +9,34 @@ import (
 	"github.com/vingarcia/insights"
 	"github.com/vingarcia/insights/internal/adapters/evaluator"
 )
+
+func Parse(strExpr string) (_ evaluator.Expression, err error) {
+	rpn, err := parse(strExpr, nil)
+	return BoolExpr(rpn), err
+}
+
+type BoolExpr []Token
+
+func (rpn BoolExpr) Evaluate(logLine json.RawMessage) (bool, error) {
+	m, err := NewLazyJsonMap(logLine)
+	if err != nil {
+		return false, err
+	}
+
+	token, err := evaluate(rpn, m)
+	if err != nil {
+		return false, err
+	}
+
+	bToken, ok := token.(boolToken)
+	if !ok {
+		return false, insights.InternalErr("expression should evaluate to a boolean", map[string]any{
+			"actualValue": token.String(),
+		})
+	}
+
+	return bool(bToken), nil
+}
 
 type ParsingCtx struct {
 	currentLine    int
@@ -24,9 +53,9 @@ func (p ParsingCtx) FormatLineCol(i int) string {
 	return strconv.Itoa(p.currentLine) + ":" + strconv.Itoa(i-p.lastLineStart)
 }
 
-// Parse will decode the input expression into a Reverse
+// parse will decode the input expression into a Reverse
 // Polish notation for easy future evaluation.
-func Parse(strExpr string, vars map[string]Token) (_ evaluator.Expression, err error) {
+func parse(strExpr string, vars map[string]Token) (_ []Token, err error) {
 	if len(strExpr) == 0 {
 		return nil, fmt.Errorf("cannot build an expression from an empty string")
 	}
@@ -145,7 +174,7 @@ func Parse(strExpr string, vars map[string]Token) (_ evaluator.Expression, err e
 				} else {
 					// If it is the list constructor:
 					// Add the list constructor to the rpn:
-					rpnBuilder.handleToken(Function(NewTokenList))
+					rpnBuilder.handleToken(Function(NewListToken))
 
 					// We make the program see it as a normal function call:
 					rpnBuilder.handleOp("()")
@@ -155,7 +184,7 @@ func Parse(strExpr string, vars map[string]Token) (_ evaluator.Expression, err e
 				i++
 			case '{':
 				// Add a map constructor call to the rpn:
-				rpnBuilder.handleToken(Function(NewTokenMap))
+				rpnBuilder.handleToken(Function(NewMapToken))
 
 				// We make the program see it as a normal function call:
 				rpnBuilder.handleOp("()")
@@ -228,15 +257,13 @@ func Parse(strExpr string, vars map[string]Token) (_ evaluator.Expression, err e
 		return nil, err
 	}
 
-	fmt.Println(rpn)
-	return nil, nil
+	return rpn, nil
 }
 
 // EvaluationData contains the context used during
 // evaluation and is passed as argument to all
-// operator and custom operator functions,
-// which allows the operators to take advantage
-// of that
+// operator and custom operator functions, which
+// allows the operators to take advantage of this info
 type EvaluationData struct {
 	Vars mapToken
 
@@ -244,8 +271,8 @@ type EvaluationData struct {
 	RightRef refToken
 }
 
-// Evaluate will copy
-func Evaluate(originalRpn []Token, vars map[string]Token) (_ Token, err error) {
+// evaluate will copy the input rpn and then process it until it gets a resulting response
+func evaluate(originalRpn []Token, vars map[string]Token) (_ Token, err error) {
 	var left, right Token
 	data := EvaluationData{
 		Vars: vars,

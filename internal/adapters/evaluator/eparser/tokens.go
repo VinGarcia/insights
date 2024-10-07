@@ -1,11 +1,14 @@
 package eparser
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
 	"unicode"
+
+	"github.com/vingarcia/insights"
 )
 
 type Token interface {
@@ -98,44 +101,6 @@ func (b boolToken) String() string {
 	return "false"
 }
 
-// mapToken represent boolean values
-type mapToken map[string]Token
-
-func (m mapToken) Clone() Token {
-	return m
-}
-
-func (m mapToken) String() string {
-	b, err := json.Marshal(m)
-	if err != nil {
-		return fmt.Sprintf("error stringifying '%#v': %s", m, err)
-	}
-
-	return string(b)
-}
-
-func (m mapToken) getChildMap() mapToken {
-	return mapToken{
-		"$parent": m,
-	}
-}
-
-// tupleToken represents tuples like in Python: (1, "foo", false)
-type tupleToken []Token
-
-func (t tupleToken) Clone() Token {
-	return t
-}
-
-func (t tupleToken) String() string {
-	items := []string{}
-	for _, token := range t {
-		items = append(items, token.String())
-	}
-
-	return "(" + strings.Join(items, ",") + ")"
-}
-
 // refToken is used to keep references
 type refToken struct {
 	// The value found at compilation time
@@ -222,4 +187,118 @@ func (v varToken) Resolve(vars map[string]Token) Token {
 	}
 
 	return value
+}
+
+// lazyJsonToken will unmarshal from
+// JSON in a lazy way, i.e. it will keep
+// most of the json as a json.RawMessage
+// and only unmarshal further if/when required.
+type lazyJsonToken struct {
+	value Token
+	json  json.RawMessage
+}
+
+// NewLazyJsonMap will parse the map in an lazy way so we don't
+// unmarshal anything we don't need to at first
+// It also validates the input JSON so we don't need to handle
+// issues with invalid JSON later on
+func NewLazyJsonMap(b []byte) (mapToken, error) {
+	var m map[string]json.RawMessage
+	err := json.Unmarshal(b, &m)
+	if err != nil {
+		return mapToken{}, insights.ParserErr("bad input json received", map[string]any{
+			"invalidJson": string(b),
+			"error":       err.Error(),
+		})
+	}
+
+	token := mapToken{}
+	for k, v := range m {
+		token[k] = lazyJsonToken{
+			json: v,
+		}
+	}
+
+	return token, nil
+}
+
+func (l lazyJsonToken) Clone() Token {
+	return l
+}
+
+func (l lazyJsonToken) String() string {
+	if l.value != nil {
+		return l.value.String()
+	}
+	return string(l.json)
+}
+
+func (l lazyJsonToken) Value() Token {
+	if l.value == nil {
+		var err error
+		l.value, err = unmarshalLazyValue(l.json)
+		if err != nil {
+			panic(fmt.Sprintf(
+				`invalid JSON received for lazyJsonToken, this should have been validated before calling Evaluate!: %s`,
+				err,
+			))
+		}
+	}
+
+	return l.value
+}
+
+func unmarshalLazyValue(rawJSON []byte) (Token, error) {
+	rawJSON = bytes.TrimSpace(rawJSON)
+	switch rawJSON[0] {
+	case
+		byte('0'), byte('1'), byte('2'), byte('3'), byte('4'),
+		byte('5'), byte('6'), byte('7'), byte('8'), byte('9'):
+
+		var f float64
+		return floatToken(f), json.Unmarshal(rawJSON, &f)
+
+	case byte('"'):
+		var s string
+		return strToken(s), json.Unmarshal(rawJSON, &s)
+
+	case byte('f'), byte('t'):
+		var b bool
+		return boolToken(b), json.Unmarshal(rawJSON, &b)
+
+	case byte('{'):
+		var m map[string]json.RawMessage
+		err := json.Unmarshal(rawJSON, &m)
+		if err != nil {
+			return nil, err
+		}
+
+		token := mapToken{}
+		for k, v := range m {
+			token[k] = lazyJsonToken{
+				json: v,
+			}
+		}
+		return token, nil
+
+	case byte('['):
+		var l []json.RawMessage
+		err := json.Unmarshal(rawJSON, &l)
+		if err != nil {
+			return nil, err
+		}
+
+		token := listToken{}
+		for _, v := range l {
+			token = append(token, lazyJsonToken{
+				json: v,
+			})
+		}
+		return token, nil
+
+	default:
+		return nil, insights.InternalErr("unrecognized JSON value received on unmarshalLazyValue", map[string]any{
+			"value": string(rawJSON),
+		})
+	}
 }

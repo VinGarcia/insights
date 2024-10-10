@@ -29,6 +29,34 @@ func Test(t *testing.T, factory func(expr string) (Expression, error)) {
 			},
 			expectedResult: true,
 		},
+		{
+			expr: "a != 1",
+			vars: map[string]any{
+				"a": 1,
+			},
+			expectedResult: false,
+		},
+		{
+			expr: "a == 0b1010",
+			vars: map[string]any{
+				"a": 10,
+			},
+			expectedResult: true,
+		},
+		{
+			expr: "a == 012",
+			vars: map[string]any{
+				"a": 10,
+			},
+			expectedResult: true,
+		},
+		{
+			expr: "a == 0xA",
+			vars: map[string]any{
+				"a": 10,
+			},
+			expectedResult: true,
+		},
 	}
 
 	for _, test := range tests {

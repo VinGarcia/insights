@@ -1,6 +1,9 @@
 package eparser
 
-import "fmt"
+import (
+	"fmt"
+	"reflect"
+)
 
 // Operator represents all types of operators including
 // left and right unary operators.
@@ -38,12 +41,49 @@ var opPrecedence = map[string]int{
 	"!": 3,
 }
 
-var operators = map[opToken]Operator{
-	">":  greaterThanOp,
-	"<":  lesserThanOp,
-	"==": equalsOp,
-	"!=": differsOp,
+type opTypePair struct {
+	left  reflect.Type
+	right reflect.Type
 }
+
+func newOpTypePair(t1 any, t2 any) opTypePair {
+	return opTypePair{
+		left:  reflect.TypeOf(t1),
+		right: reflect.TypeOf(t2),
+	}
+}
+
+var operators = map[opToken]map[opTypePair]Operator{
+	// ">":  greaterThanOp,
+	// "<":  lesserThanOp,
+	"==": map[opTypePair]Operator{
+		newOpTypePair(floatToken(0), floatToken(0)): equalsFloatOp,
+		newOpTypePair(intToken(0), intToken(0)):     equalsIntOp,
+		newOpTypePair(floatToken(0), intToken(0)):   equalsFloatIntOp,
+		newOpTypePair(intToken(0), floatToken(0)):   equalsIntFloatOp,
+	},
+	"!=": map[opTypePair]Operator{
+		newOpTypePair(floatToken(0), floatToken(0)): differsOp,
+		newOpTypePair(intToken(0), intToken(0)):     differsOp,
+		newOpTypePair(floatToken(0), intToken(0)):   differsFloatIntOp,
+		newOpTypePair(intToken(0), floatToken(0)):   differsIntFloatOp,
+	},
+}
+
+// opRunes contains the list of runes used
+// on the currently registered operators so
+// so we can differentiate op characters from
+// other types of characters
+var opRunesSet = func() (runes map[rune]bool) {
+	runeSet := map[rune]bool{}
+	for k := range operators {
+		for _, c := range k {
+			runeSet[c] = true
+		}
+	}
+
+	return runeSet
+}()
 
 func greaterThanOp(t1 Token, t2 Token, op opToken, data *EvaluationData) (Token, error) {
 	f1, ok := t1.(floatToken)
@@ -73,10 +113,30 @@ func lesserThanOp(t1 Token, t2 Token, op opToken, data *EvaluationData) (Token, 
 	return boolToken(f1 < f2), nil
 }
 
-func equalsOp(t1 Token, t2 Token, op opToken, data *EvaluationData) (Token, error) {
+func equalsIntOp(t1 Token, t2 Token, op opToken, data *EvaluationData) (Token, error) {
 	return boolToken(t1 == t2), nil
+}
+
+func equalsFloatOp(t1 Token, t2 Token, op opToken, data *EvaluationData) (Token, error) {
+	return boolToken(t1 == t2), nil
+}
+
+func equalsIntFloatOp(t1 Token, t2 Token, op opToken, data *EvaluationData) (Token, error) {
+	return boolToken(floatToken(float64(t1.(intToken))) == t2), nil
+}
+
+func equalsFloatIntOp(t1 Token, t2 Token, op opToken, data *EvaluationData) (Token, error) {
+	return boolToken(t1 == floatToken(float64(t2.(intToken)))), nil
 }
 
 func differsOp(t1 Token, t2 Token, op opToken, data *EvaluationData) (Token, error) {
 	return boolToken(t1 != t2), nil
+}
+
+func differsIntFloatOp(t1 Token, t2 Token, op opToken, data *EvaluationData) (Token, error) {
+	return boolToken(floatToken(float64(t1.(intToken))) != t2), nil
+}
+
+func differsFloatIntOp(t1 Token, t2 Token, op opToken, data *EvaluationData) (Token, error) {
+	return boolToken(t1 != floatToken(float64(t2.(intToken)))), nil
 }

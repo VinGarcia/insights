@@ -12,6 +12,7 @@ import (
 
 func Parse(strExpr string) (_ evaluator.Expression, err error) {
 	rpn, err := parse(strExpr, nil)
+
 	return BoolExpr(rpn), err
 }
 
@@ -39,9 +40,8 @@ func (rpn BoolExpr) Evaluate(logLine json.RawMessage) (bool, error) {
 }
 
 type ParsingCtx struct {
-	currentLine    int
-	lastLineStart  int
-	lastTokenWasOp bool
+	currentLine   int
+	lastLineStart int
 }
 
 func (p *ParsingCtx) HandleNewLine(newLineRuneIdx int) {
@@ -65,15 +65,14 @@ func parse(strExpr string, vars map[string]Token) (_ []Token, err error) {
 	var rpnBuilder RPNBuilder
 
 	parsingCtx := ParsingCtx{
-		currentLine:    0,
-		lastLineStart:  0,
-		lastTokenWasOp: false,
+		currentLine:   0,
+		lastLineStart: 0,
 	}
 
 	i := consumeSpaces(expr, 0, &parsingCtx)
 
 	// Each iteration of this loop should produce a token or an operator
-	for ; i < len(expr) && expr[i] != ';'; i++ {
+	for i < len(expr) && expr[i] != ';' {
 		switch {
 		case unicode.IsNumber(expr[i]):
 			var num Token
@@ -112,6 +111,7 @@ func parse(strExpr string, vars map[string]Token) (_ []Token, err error) {
 					rpnBuilder.handleToken(varToken([]string{varName}))
 				}
 			}
+
 		case expr[i] == '\'' || expr[i] == '"':
 			// If it is a string literal, parse it and
 			// add to the output queue.
@@ -213,7 +213,7 @@ func parse(strExpr string, vars map[string]Token) (_ []Token, err error) {
 						'(': true, ')': true, '[': true, ']': true, '{': true, '}': true,
 						'_': true,
 					}
-					for i < len(expr) && unicode.IsPunct(expr[i]) && !opStartingChars[expr[i]] {
+					for i < len(expr) && opRunesSet[expr[i]] && !opStartingChars[expr[i]] {
 						opRunes = append(opRunes, expr[i])
 						i++
 					}
@@ -283,8 +283,8 @@ func evaluate(originalRpn []Token, vars map[string]Token) (_ Token, err error) {
 	evalStack := []Token{}
 
 	l := len(rpn)
-	for ; l > 0; l-- {
-		token := rpn[l-1]
+	for i := 0; i < l; i++ {
+		token := rpn[i]
 		op, isOperator := token.(opToken)
 		if !isOperator {
 			if v, isVar := token.(varToken); isVar {
@@ -347,7 +347,7 @@ func evaluate(originalRpn []Token, vars map[string]Token) (_ Token, err error) {
 			// * * * * * All other operations * * * * * //
 
 			// TODO(vingarcia): Copy the exec_operator func from cparse (it's more complex than this):
-			resp, err := operators[op](left, right, op, &data)
+			resp, err := findAndRunOperator(op, left, right, &data)
 			if err != nil {
 				return nil, insights.RuntimeErr("operation error", map[string]any{
 					"error": err,
@@ -358,7 +358,34 @@ func evaluate(originalRpn []Token, vars map[string]Token) (_ Token, err error) {
 		}
 	}
 
-	return nil, nil
+	if len(evalStack) != 1 {
+		return nil, insights.InternalErr("the evalStack should contains a single element at the end", map[string]any{
+			"evalStack": evalStack,
+		})
+	}
+
+	return evalStack[0], nil
+}
+
+func findAndRunOperator(op opToken, left Token, right Token, data *EvaluationData) (Token, error) {
+	opGroup := operators[op]
+	if opGroup == nil {
+		return nil, insights.SyntaxErr("unrecognized operator", map[string]any{
+			"op": op,
+		})
+	}
+
+	opFunc := opGroup[newOpTypePair(left, right)]
+
+	if opFunc == nil {
+		return nil, insights.SyntaxErr("unsupported types for operator", map[string]any{
+			"op":         op,
+			"leftToken":  left,
+			"rightToken": right,
+		})
+	}
+
+	return opFunc(left, right, op, data)
 }
 
 func popLeftAndRightOperands(evalStack []Token) (updatedStack []Token, left Token, right Token, _ error) {
@@ -392,7 +419,7 @@ func consumeSpaces(expr []rune, index int, parsingCtx *ParsingCtx) (newIndex int
 		}
 	}
 
-	return 0
+	return index
 }
 
 // isVarChar checks if a character is the first character of a variable:
@@ -428,16 +455,26 @@ func parseNumber(expr []rune, index int) (newIndex int, token Token, err error) 
 
 	i := index
 	if expr[i] == '0' {
-		// Handle hexadecimal numbers such as 0x10
-		if expr[i+1] == 'x' {
-			base = 16
-			// Skip the '0x' characters
-			i += 2
-			// Handle octal numbers such as 010
-		} else if unicode.IsNumber(expr[i+1]) {
-			base = 8
-			// Skip the '0' character
-			i++
+		if i+1 < len(expr) {
+			switch expr[i+1] {
+			// Handle hexadecimal numbers such as 0x10:
+			case 'x':
+				base = 16
+				// Skip the '0x' characters
+				i += 2
+				// Handle binary numbers such as 010:
+			case 'b':
+				base = 2
+				// Skip the '0x' characters
+				i += 2
+				// Handle octal numbers such as 010:
+			default:
+				if unicode.IsNumber(expr[i+1]) {
+					base = 8
+					// Skip the '0' character
+					i++
+				}
+			}
 		}
 	}
 
@@ -482,10 +519,10 @@ func parseNumber(expr []rune, index int) (newIndex int, token Token, err error) 
 		return i, floatToken(num), nil
 	}
 
-	num, err := strconv.ParseInt(string(expr[index:i]), base, 64)
+	num, err := strconv.ParseInt(string(expr[index:i]), 0, 64)
 	if err != nil {
 		return 0, nil, insights.SyntaxErr("error parsing numeric literal", map[string]any{
-			"literal": expr[index:i],
+			"literal": string(expr[index:i]),
 			"error":   err,
 		})
 	}

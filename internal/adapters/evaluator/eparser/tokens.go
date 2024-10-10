@@ -149,8 +149,12 @@ func (v varToken) Clone() Token {
 }
 
 func (v varToken) String() string {
-	out := ""
-	for _, str := range v {
+	if len(v) == 0 {
+		return ""
+	}
+
+	out := v[0]
+	for _, str := range v[1:] {
 		onlyVarChars := isVarChar(rune(str[0]))
 		if onlyVarChars {
 			for _, c := range str[1:] {
@@ -173,6 +177,10 @@ func (v varToken) String() string {
 
 func (v varToken) Resolve(vars map[string]Token) Token {
 	value := vars[v[0]]
+	if lazy, ok := value.(lazyJsonToken); ok {
+		value = lazy.Value()
+	}
+
 	for _, str := range v[1:] {
 		m, ok := value.(mapToken)
 		if !ok {
@@ -180,6 +188,9 @@ func (v varToken) Resolve(vars map[string]Token) Token {
 		}
 
 		value = m[str]
+		if lazy, ok := value.(lazyJsonToken); ok {
+			value = lazy.Value()
+		}
 	}
 
 	if value == nil {
